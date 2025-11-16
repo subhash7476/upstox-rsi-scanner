@@ -1,69 +1,52 @@
-# rsi_v3_scanner.py
+# rsi_scanner.py
 import streamlit as st
 import pandas as pd
+import requests
+import urllib.parse
 from datetime import datetime, timedelta
-from upstox_client import ApiClient, Configuration, HistoricalDataApi, InstrumentsApi
 from ta.momentum import RSIIndicator
-import requests  # For raw v3 call if SDK fallback needed
 
-def get_upstox_client():
-    cfg = st.secrets["upstox"]
-    conf = Configuration()
-    conf.api_key = cfg["api_key"]
-    conf.api_secret = cfg["api_secret"]
-    conf.access_token = cfg["access_token"]
-    return ApiClient(conf)
+# --- Instrument key mapping (add more as needed) ---
+INSTRUMENT_MAP = {
+    "TCS.NS": "NSE_EQ|INE467B01029",
+    "RELIANCE.NS": "NSE_EQ|INE002A01018",
+    "HDFCBANK.NS": "NSE_EQ|INE040A01034",
+    "INFY.NS": "NSE_EQ|INE090A01021",
+    # Add others here
+}
 
-def get_instrument_key(client: ApiClient, symbol: str) -> str:
-    """Fetch full NSE_EQ|INE... key via Instruments API."""
+def get_instrument_key(symbol: str) -> str:
+    return INSTRUMENT_MAP.get(symbol, f"NSE_EQ|{symbol.replace('.NS', '')}")
+
+def fetch(symbol: str):
     try:
-        inst_api = InstrumentsApi(client)
-        # Query by symbol (e.g., "RELIANCE")
-        resp = inst_api.get_instrument_by_symbol(exchange_segment="NSE_EQ", symbol=symbol.replace(".NS", ""))
-        if resp.data and len(resp.data) > 0:
-            return resp.data[0].instrument_key
-        st.warning(f"No key found for {symbol}; using fallback.")
-    except Exception as e:
-        st.warning(f"Instruments API error for {symbol}: {e}")
-    # Fallback: Manual NSE_EQ|SYMBOL
-    return f"NSE_EQ|{symbol.replace('.NS', '')}"
+        cfg = st.secrets
+        token = cfg["upstox"]["access_token"]
+        end = datetime.now().strftime("%Y-%m-%d")  # to_date
+        start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")  # from_date
 
-def fetch_v3(symbol: str):
-    try:
-        client = get_upstox_client()
-        hist_api = HistoricalDataApi(client)
-        cfg = st.secrets["scanner"]
-        
-        end = datetime.now().strftime("%Y-%m-%d")
-        start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")  # v3 limit: 1 year for 5-min
-        
-        instrument_key = get_instrument_key(client, symbol)
-        unit = cfg["unit"]  # e.g., "minutes"
-        interval = cfg["interval"]  # e.g., "5" (number)
-        
-        # v3 SDK call (maps to /v3/historical-candle/{key}/{unit}/{interval}/{to}/{from})
-        data = hist_api.get_historical_candle_data(
-            instrument_key=instrument_key,
-            unit=unit,  # New v3 param
-            interval=interval,  # Numeric string
-            from_date=start,  # YYYY-MM-DD
-            to_date=end
-        )
-        
-        if not data.data or not data.data.candles:
-            # Fallback: Raw curl equivalent (if SDK buggy)
-            headers = {
-                "Authorization": f"Bearer {st.secrets['upstox']['access_token']}",
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            }
-            url = f"https://api.upstox.com/v3/historical-candle/{instrument_key}/{unit}/{interval}/{end}/{start}"
-            resp = requests.get(url, headers=headers)
-            if resp.status_code != 200:
-                st.error(f"v3 Raw API error {resp.status_code}: {resp.text}")
-                return pd.DataFrame()
-            data = resp.json()
-        
+        key = urllib.parse.quote(get_instrument_key(symbol))
+        unit = cfg["scanner"]["unit"]
+        interval = cfg["scanner"]["interval"]
+
+        # EXACT curl format from Upstox v3 docs
+        url = f"https://api.upstox.com/v3/historical-candle/{key}/{unit}/{interval}/{end}/{start}"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}"
+        }
+
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200:
+            st.error(f"[{symbol}] API {resp.status_code}: {resp.text}")
+            return pd.DataFrame()
+
+        data = resp.json()
+        if not data.get("data", {}).get("candles"):
+            return pd.DataFrame()
+
         df = pd.DataFrame(
             data["data"]["candles"],
             columns=["timestamp", "open", "high", "low", "close", "volume", "oi"]
@@ -71,9 +54,9 @@ def fetch_v3(symbol: str):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
         df.set_index("timestamp", inplace=True)
         df = df.astype(float).sort_index()
-        return df.tail(int(cfg["lookback_bars"]))
+        return df.tail(int(cfg["scanner"]["lookback_bars"]))
     except Exception as e:
-        st.error(f"v3 Fetch error for {symbol}: {e}")
+        st.error(f"[{symbol}] Error: {e}")
         return pd.DataFrame()
 
 def get_signal(df: pd.DataFrame):
@@ -92,7 +75,7 @@ def scan_stocks():
         symbols = [line.strip() for line in f if line.strip()]
     signals = []
     for sym in symbols:
-        df = fetch_v3(sym)
+        df = fetch(sym)
         sig = get_signal(df)
         if sig:
             action, price, rsi = sig
