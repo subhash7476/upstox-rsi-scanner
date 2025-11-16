@@ -1,0 +1,36 @@
+name: Daily Upstox Token Refresh
+
+on:
+  schedule:
+    - cron: '30 3 * * *'  # 9:00 AM IST daily
+  workflow_dispatch:      # Manual trigger
+
+jobs:
+  refresh-token:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install requests
+        run: pip install requests
+
+      - name: Run token refresh
+        env:
+          UPSTOX_API_KEY: ${{ secrets.UPSTOX_API_KEY }}
+          UPSTOX_API_SECRET: ${{ secrets.UPSTOX_API_SECRET }}
+          UPSTOX_AUTH_CODE: ${{ secrets.UPSTOX_AUTH_CODE }}
+        run: python get_token.py
+
+      - name: Commit secrets.toml
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .streamlit/secrets.toml
+          git commit -m "Auto: Update access_token $(date +'%H:%M')" || echo "No changes"
+          git push
