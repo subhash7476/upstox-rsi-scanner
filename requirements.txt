@@ -2,3 +2,4 @@ streamlit
 upstox-python-sdk==2.12.0
 pandas
 ta
+requests  # For fallback curl if needed
