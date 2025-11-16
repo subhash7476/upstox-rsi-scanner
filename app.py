@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import time
-from rsi_v3_scanner import scan_stocks
+from rsi_scanner import scan_stocks
 
 st.set_page_config(page_title="Upstox RSI v3 Scanner", layout="wide")
 st.title("Live RSI Signals (Upstox API v3)")
