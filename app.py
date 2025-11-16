@@ -3,14 +3,14 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import time
-from rsi_scanner import scan_stocks
+from rsi_v3_scanner import scan_stocks
 
-st.set_page_config(page_title="Upstox RSI Scanner", layout="wide")
-st.title("Live RSI Signals (Upstox)")
+st.set_page_config(page_title="Upstox RSI v3 Scanner", layout="wide")
+st.title("Live RSI Signals (Upstox API v3)")
 
 # Sidebar
 with st.sidebar:
-    st.header("Settings")
+    st.header("v3 Settings")
     st.write(f"**Time:** {datetime.now().strftime('%I:%M %p IST')}")
     auto = st.checkbox("Auto-refresh (60s)", True)
     if st.button("Refresh Now"):
@@ -22,7 +22,7 @@ def get_signals():
     return scan_stocks()
 
 # Run scan
-with st.spinner("Scanning with Upstox..."):
+with st.spinner("Fetching v3 historical candles..."):
     df = get_signals()
 
 # Display
